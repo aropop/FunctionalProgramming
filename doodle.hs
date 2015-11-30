@@ -1,7 +1,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 module Doodle (Doodle(initialize, add, remove, toogle), Pool(freshKey, get, set), run, DoodleInstance, emptyPool) where
-import qualified System.IO
 import qualified Data.Time as T
+import qualified System.IO
 
 type MyTime = T.UTCTime
 
@@ -14,7 +14,7 @@ prompt s m f = do putStrLn s
 
 replaceNum :: Int -> a -> [a] -> [a]
 replaceNum _ _ [] = []
-replaceNum 1 a (_:xs) = a : xs
+replaceNum 0 a (_:xs) = a : xs
 replaceNum n a (x:xs) = x : replaceNum (n-1) a xs
 
 class Doodle d where
@@ -23,28 +23,54 @@ class Doodle d where
   remove :: Int -> d t -> d t
   toogle :: String -> Int -> d t -> d t
 
-data DoodleInstance tf = Di { name :: String
-                            , startTimes :: [tf]
-                            , endTimes :: [tf]
+data DoodleInstance tf = Di { name         :: String
+                            , startTimes   :: [tf]
+                            , endTimes     :: [tf]
                             , participants :: [[String]]
                             }
 instance Doodle DoodleInstance where
     initialize n = Di n [] [] []
-    add (t1, t2) (Di n ss es ns) = Di n (t1 : ss) (t2 : es) ([] : ns)
-    remove num (Di n ss es ns) =  Di n (deleteFromList num ss) (deleteFromList num es) (deleteFromList num ns) where
-        deleteFromList lnum ls
-          | num < length ls = take (lnum - 1) ls ++ tail (snd $ splitAt (lnum - 1) ls)
-          | otherwise = ls
-    toogle s i (Di n ss es ns) = Di n ss es $ replaceNum i (s : (ns !! i)) ns
+    add (t1, t2) orig@(Di n ss es ns) = let test [] = True
+                                            test ((st, en):ts) = not ((st <= t1) && (en > t1) || (st < t2) && (en >= t2)) && test ts
+                                            putInPlace [] _ = ([t1], [t2])
+                                            putInPlace (st:sts) (en:ens)
+                                                | st < t1 = (st : fst rec, en : snd rec)
+                                                | otherwise = (t1:st:sts, t2:en:ens)
+                                                where rec = putInPlace sts ens
+                                        in
+                                            if (t1 < t2) && test (zip ss es)
+                                                then let placed = putInPlace ss es in uncurry (Di n) placed ([] : ns)
+                                                else orig
+
+    remove num (Di n ss es ns) =  Di n (deleteFromList num ss) (deleteFromList num es) (deleteFromList num ns)
+        where deleteFromList lnum ls
+                  | num < length ls = take (lnum - 1) ls ++ tail (snd $ splitAt (lnum - 1) ls)
+                  | otherwise = ls
+    toogle s i orig@(Di n ss es ns)
+           | i > (length ns -1) || i < 0 = orig
+           | otherwise = let newlist = if s `elem` sublist
+                                           then sublist
+                                           else s : sublist
+                                       where sublist = (ns !!i)
+                            in Di n ss es $ replaceNum i newlist ns
 
 instance Show (DoodleInstance MyTime) where
-    show di = let line = "+-------------------------------------------------+\n"
-                  timesLn s e u = "| " ++ s ++ " | " ++ e ++ " | "++ u ++ " |\n"
+    show di = let lineExtraLength = foldr (\lst cnt -> foldr (\str cnt2 -> length str + cnt2 + 2) 0 lst `max` cnt) 0 $ participants di
+                  line = "+---------------------------------------------------"
+                     ++ replicate (if lineExtraLength /= 0 then lineExtraLength + 3 else 0) '-' -- + 4 to count in table delimeter and spacing
+                     ++ "+\n"
+                  fill x l = x ++ replicate (l - length x - 1)  ' '
+                  timesLn s e p =
+                      "| " ++ s ++ " | "
+                      ++ e ++
+                      (if not $ null p then " | " ++ concat p else "")
+                      ++  " |\n" ++ line
+                  zipped = zip3 (startTimes di) (endTimes di) $ participants di
                 in
                     line
-                    ++ "| " ++ name di ++ " |\n" -- TODO spacing
-                    ++ line
-                    ++ foldr (\(st, en, ul) s -> timesLn (show st) (show en) (show ul) ++ s) "" (zip3 (startTimes di) (endTimes di) (concat (participants di)))
+                        ++ "| " ++ fill (name di) (length line - 4) ++ " |\n"
+                        ++ line
+                        ++ foldr (\(st, en, lst) s -> timesLn (show st) (show en) lst ++ s) "" zipped
 
 class Pool p where
   freshKey :: (Ord k, Enum k) => p k (d t) -> k
@@ -91,3 +117,8 @@ emptyPool :: PoolInstance Int (DoodleInstance MyTime)
 emptyPool = Pi [] []
 
 main = run emptyPool
+-- Just(Right(2015-01-01 04:00:00, 2015-01-01 06:00:00))
+-- Just(Right(2015-01-01 05:00:00, 2015-01-01 07:00:00))
+-- Just(Right(2015-01-01 06:00:01, 2015-01-01 07:00:00))
+-- Just(Right(2015-01-02 04:00:00, 2015-01-02 06:00:00))
+-- Just(Right(2015-01-02 06:00:01, 2015-01-02 07:00:00))
