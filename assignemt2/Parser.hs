@@ -1,4 +1,4 @@
-module Parser (Parser, apply, sat, char, string, some, many, orelse, oneof, blank, keyword, token, integer, float, allof) where
+module Parser (Parser, apply, sat, char, string, some, many, orelse, oneof, blank, keyword, token, text, integer, float, allof) where
 
 import Control.Monad
 import Data.Char
@@ -95,6 +95,10 @@ keyword s = blank >> string s
 token :: Parser String
 token = blank >> (some $ sat isAlpha)
 
+-- Eat text
+text :: Parser String
+text = blank >> (some $ sat (\e -> isAlpha e || isDigit e))
+
 -- Parse an integer
 integer :: Parser Int
 integer =
@@ -114,4 +118,3 @@ float =
      keyword "."
      decs <- some (sat isDigit)
      return $ read $ sign ++ ints ++ "." ++ decs
-
