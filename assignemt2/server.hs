@@ -56,8 +56,14 @@ readWrite tvar f = atomically(do l <- readTVar tvar
 myRead :: TVar [a] -> IO [a]
 myRead tvar = atomically (readTVar tvar)
 
-modifyPerson :: TVar [Person] -> String -> (Person -> Person) -> IO (TVar [Person])
-modifyPerson tvar identify f = readWrite tvar $ foldr (\el build -> if name el == identify then f el : build else el : build) []
+modify :: (a -> Bool) -> TVar [a] -> (a -> a) -> IO (TVar [a])
+modify identifyF tvar f = readWrite tvar $ foldr (\el build -> if identifyF el then f el : build else el : build) []
+
+modifyPerson :: String -> TVar [Person] -> (Person -> Person) -> IO (TVar [Person])
+modifyPerson identify = modify (\(Person n _ _) -> n == identify)
+
+modifyDoodle :: String -> TVar [Doodle] -> (Doodle -> Doodle) -> IO (TVar [Doodle])
+modifyDoodle identify = modify (\(Doodle _ n _ _ _) -> n == identify)
 
 dispatchCommand :: Grammer.RequestExpression -> TVar [Person] -> TVar [Doodle] -> IO Grammer.ResponseExpression
 dispatchCommand (Grammer.AddTeacher (Grammer.AuthCommand login command)) personList _ =
@@ -70,6 +76,8 @@ dispatchCommand (Grammer.GetDoodle dn) _ doodleList =
     getDoodle dn doodleList
 dispatchCommand (Grammer.SetDoodle (Grammer.AuthCommand login dn) de) personList doodleList =
     authenticate login TeacherRight personList $ setDoodle dn doodleList de
+dispatchCommand (Grammer.Subscribe (Grammer.AuthCommand login dn)) personList doodleList =
+    authenticate login StudentRight personList $ subscribe dn doodleList
 -- dispatchCommand (Grammer.Subscribe ac) personList = authenticate TeacherRight [] subscribe
 -- dispatchCommand (Grammer.Prefer ac sl) personList = authenticate TeacherRight [] $ prefer sl
 -- dispatchCommand (Grammer.ExamSchedule lg) personList = authenticate TeacherRight [] examSchedule
@@ -95,7 +103,7 @@ addStudent token personList _ = addPerson token personList Student
 
 changePassword :: String -> TVar [Person] -> Person -> IO Grammer.ResponseExpression
 changePassword token personList person =
-    do _ <- modifyPerson personList (name person) (\(Person nm _ tc) -> Person nm token tc)
+    do _ <- modifyPerson (name person) personList (\(Person nm _ tc) -> Person nm token tc)
        return $ Grammer.Ok Grammer.OkJust
 
 getDoodle :: String -> TVar [Doodle] -> IO Grammer.ResponseExpression
@@ -114,6 +122,34 @@ setDoodle dName doodles de p =
              (\_ -> return Grammer.IdTaken)
              (extract (dEq dName) actualDoodles)
 
+subscribe :: String -> TVar [Doodle] -> Person -> IO Grammer.ResponseExpression
+subscribe dName doodles p =
+    do _ <- modifyDoodle dName doodles (\(Doodle slts nm pl own pr) -> Doodle slts nm (name p : pl) own pr)
+       return $ Grammer.Ok Grammer.OkJust
+
+-- Function to replace an element in a list
+
+prefer :: String -> TVar [Doodle] -> Slot -> Person -> IO Grammer.ResponseExpression
+prefer dName doodles sl p =
+    -- TODO do checks
+    do _ <- modifyDoodle dName doodles (\(o@Doodle slts nm pl own pr) ->
+                let maybet = elemIndex sl slts
+                    pName = name p
+                    (_, newPr) = maybe pr
+                                  (\idx -> foldr (\nLst (i, build) -> if pName `elem` nLst &&
+                                                                      then if i == idx
+                                                                           then (ipp, nLst : build)
+                                                                           else (ipp, delete pName nLst : build)
+                                                                      else if i == idx
+                                                                           then (ipp, (pName : nLst) : build)
+                                                                           else (ipp, nLst : build)
+                                                                      where ipp = i + 1)
+                                                (0, [])
+                                                pr)
+                                maybet
+                in
+                   Doodle slts nm pl own newPr
+       return $ Grammer.Ok Grammer.OkJust
 
 -- Continues handling requests forever
 handleRecursive :: Socket -> TVar [Person] -> TVar [Doodle]-> IO ()

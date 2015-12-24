@@ -120,7 +120,7 @@ time = do
     Parser.keyword ":"
     minute <- Parser.exactInteger
     Parser.keyword "+"
-    tzhour <- Parser.exactIntegerLength 2
+    tzhour <- Parser.exactIntegerLength 2 -- Allow for both +01:00 and +0100 notations (as used in show)
     Parser.orelse (Parser.keyword ":") (return ())
     tzminute <- Parser.exactInteger
     -- See https://hackage.haskell.org/package/time-1.5.0.1/docs/Data-Time-Format.html#t:ParseTime

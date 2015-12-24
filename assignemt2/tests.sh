@@ -41,3 +41,8 @@ tst ${A:0:2} "ok"
 # Test get-doodle
 A=$(echo "get-doodle Cooking" | nc localhost 8000)
 tst ${A:0:2} "ok"
+# Test subscribe
+A=$(echo "subscribe studenta@$PSWD1 Cooking" | nc localhost 8000)
+tst ${A:0:2} "ok"
+A=$(echo "subscribe studentB@$PSWD2 Cooking" | nc localhost 8000)
+tst ${A:0:2} "ok"
