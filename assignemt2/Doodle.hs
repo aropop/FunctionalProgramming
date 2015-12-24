@@ -6,7 +6,9 @@ data Doodle = Doodle { slots :: [Slot]
                      , dname :: String
                      , people :: [String]
                      , owner :: String
-                     , preferences :: [[String]]} deriving (Show)
+                     , preferences :: [[String]]}
+instance Show Doodle where
+    show (Doodle slts _ _ _ _) = show slts
 
 instance Eq Doodle where
     x == y = dname x == dname y
@@ -24,4 +26,4 @@ addSlot :: Slot -> Doodle -> Doodle
 addSlot sl (Doodle sls dn pls own prefs) = Doodle (sl:sls) dn pls own $ [] : prefs
 
 dEq :: String -> Doodle -> Bool
-dEq s d = s == dname d 
+dEq s d = s == dname d

@@ -1,4 +1,4 @@
-module Parser (Parser, apply, sat, char, string, some, many, orelse, oneof, blank, keyword, token, text, integer, float, allof, exactInteger) where
+module Parser (Parser, apply, sat, char, string, some, many, orelse, oneof, blank, keyword, token, text, integer, float, allof, exactInteger, exactIntegerLength) where
 
 import Control.Monad
 import Data.Char
@@ -53,6 +53,11 @@ some p = do x <- p
             xs <- many p
             return $ x:xs
 
+exact :: Int -> Parser a -> Parser [a]
+exact 0 _ = return []
+exact n p = do x <- p
+               xs <- exact (n - 1) p
+               return $ x:xs
 --------------------
 -- Simple Parsers --
 --------------------
@@ -116,6 +121,15 @@ exactInteger =
        blank
        digits <- some (sat isDigit)
        return $ sign ++ digits
+
+-- Parse exact integer (keep leading zeros)
+exactIntegerLength :: Int -> Parser String
+exactIntegerLength l =
+   do blank
+      sign <- (string "-" >> return "-") `orelse` return ""
+      blank
+      digits <- exact l (sat isDigit)
+      return $ sign ++ digits
 
 -- Parse a float
 float :: Parser Float

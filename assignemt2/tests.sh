@@ -36,7 +36,7 @@ tst ${A:0:2} "ok"
 A=$(echo "change-password teacher@$PSWD teacherpswd" | nc localhost 8000)
 tst ${A:0:2} "ok"
 # Test set-doodle
-A=$(echo "set-doodle teacher@teacherpswd Cooking [2016-01-04T14:00+01:00 / 2016-01-04T16:00+01:00,2016-01-04T13:00+01:00 / 2016-01-04T15:00+01:00]" | nc localhost 8000)
+A=$(echo "set-doodle teacher@teacherpswd Cooking [2016-01-04T14:00+01:00 / 2016-01-04T16:00+0100,2016-01-04T13:00+01:00 / 2016-01-04T15:00+01:00]" | nc localhost 8000)
 tst ${A:0:2} "ok"
 # Test get-doodle
 A=$(echo "get-doodle Cooking" | nc localhost 8000)

@@ -7,7 +7,10 @@ type TokenExpression = String
 
 data LoginExpression = Login TokenExpression TokenExpression deriving Show
 
-data SlotExpression = Slot {start :: T.UTCTime, end :: T.UTCTime} deriving Show
+data SlotExpression = Slot {start :: T.UTCTime, end :: T.UTCTime}
+instance Show SlotExpression where
+    show (Slot st en) = let format = T.formatTime T.defaultTimeLocale "%FT%R%z" in
+                            format st ++ "/" ++ format en
 
 type DoodleExpression = [SlotExpression]
 
@@ -117,8 +120,8 @@ time = do
     Parser.keyword ":"
     minute <- Parser.exactInteger
     Parser.keyword "+"
-    tzhour <- Parser.exactInteger
-    Parser.keyword ":"
+    tzhour <- Parser.exactIntegerLength 2
+    Parser.orelse (Parser.keyword ":") (return ())
     tzminute <- Parser.exactInteger
     -- See https://hackage.haskell.org/package/time-1.5.0.1/docs/Data-Time-Format.html#t:ParseTime
     return $ read $ year ++ "-" ++ month ++ "-" ++ day ++ " " ++ hour ++ ":" ++ minute ++ ":00 " ++ "+" ++ tzhour ++ tzminute
