@@ -4,26 +4,35 @@ import qualified Parser
 import qualified Data.Time as T
 
 type TokenExpression = String
+
 data LoginExpression = Login TokenExpression TokenExpression deriving Show
-data SlotExpression = Slot T.UTCTime T.UTCTime deriving Show
+
+data SlotExpression = Slot {start :: T.UTCTime, end :: T.UTCTime} deriving Show
+
 type DoodleExpression = [SlotExpression]
+
 data AuthCommand = AuthCommand LoginExpression TokenExpression deriving Show
+
 data RequestExpression = AddTeacher AuthCommand
                         | AddStudent AuthCommand
                         | ChangePassword AuthCommand
-                        | GetDoodle AuthCommand
+                        | GetDoodle TokenExpression -- AuthCommand
                         | SetDoodle AuthCommand DoodleExpression
                         | Subscribe AuthCommand
                         | Prefer AuthCommand SlotExpression
                         | ExamSchedule LoginExpression
                         deriving Show
+
 data ExamExpression = Exam TokenExpression SlotExpression
 instance Show ExamExpression where
     show (Exam t s) = show t ++ ":" ++ show s
+
 type Exams = [ExamExpression]
+
 data ScheduleExpression = Schedule Exams
 instance Show ScheduleExpression where
     show (Schedule lst) = "{" ++ tail (concatMap (("," ++ ) . show) lst) ++ "}"
+
 data OkExpression = OkToken TokenExpression
                     | OkDoodle DoodleExpression
                     | OkJust
@@ -33,15 +42,18 @@ instance Show OkExpression where
     show (OkToken t) = "ok " ++ show t
     show (OkDoodle t) = "ok " ++ show t
     show (OkSchedule t) = "ok " ++ show t
+
 data ResponseExpression = WrongLogin
                           | IdTaken
                           | NoSuchId
                           | NoSuchSlot
                           | NotSubscribed
                           | NoPossibleSchedule
+                          | CouldNotParse
                           | Ok OkExpression
 instance Show ResponseExpression where
     show WrongLogin = "wrong-login"
+    show CouldNotParse = "could-not-parse-request"
     show IdTaken = "id-taken"
     show NoSuchId = "no-such-id"
     show NoSuchSlot = "no-such-slot"
@@ -81,43 +93,50 @@ addTeacher = parseSimpleCommand "add-teacher" AddTeacher
 changePassword :: Parser.Parser RequestExpression
 changePassword = parseSimpleCommand "change-password" ChangePassword
 
+--getDoodle :: Parser.Parser RequestExpression
+--getDoodle = parseSimpleCommand "get-doodle" GetDoodle
+
 getDoodle :: Parser.Parser RequestExpression
-getDoodle = parseSimpleCommand "get-doodle" GetDoodle
+getDoodle = do
+    Parser.keyword "get-doodle"
+    identifier <- Parser.token
+    return $ GetDoodle identifier
 
 subscribe :: Parser.Parser RequestExpression
 subscribe = parseSimpleCommand "subscribe" Subscribe
 
 time :: Parser.Parser T.UTCTime
 time = do
-    year <- Parser.integer
+    year <- Parser.exactInteger
     Parser.keyword "-"
-    month <- Parser.integer
+    month <- Parser.exactInteger
     Parser.keyword "-"
-    day <- Parser.integer
+    day <- Parser.exactInteger
     Parser.keyword "T"
-    hour <- Parser.integer
+    hour <- Parser.exactInteger
     Parser.keyword ":"
-    minute <- Parser.integer
+    minute <- Parser.exactInteger
     Parser.keyword "+"
-    tzhour <- Parser.integer
+    tzhour <- Parser.exactInteger
     Parser.keyword ":"
-    tzminute <- Parser.integer
-    return $ read $ show year ++ "-" ++ show month ++ "-" ++ show day ++ "T" ++ show hour ++ ":" ++ show minute ++ "+" ++ show tzhour ++ ":" ++ show tzminute
+    tzminute <- Parser.exactInteger
+    -- See https://hackage.haskell.org/package/time-1.5.0.1/docs/Data-Time-Format.html#t:ParseTime
+    return $ read $ year ++ "-" ++ month ++ "-" ++ day ++ " " ++ hour ++ ":" ++ minute ++ ":00 " ++ "+" ++ tzhour ++ tzminute
 
 
 slot :: Parser.Parser SlotExpression
 slot = do
-    start <- time
+    st <- time
     Parser.keyword "/"
-    end <- time
-    return $ Slot start end
+    en <- time
+    return $ Slot st en
 
 slots :: Parser.Parser [SlotExpression]
-slots = Parser.orelse (do Parser.keyword ","
-                          ; slt <- slot
-                          ; slts <- slots
-                          ; return (slt:slts))
-                      (do return [])
+slots =  do slt <- slot
+            Parser.orelse (do Parser.keyword ","
+                              slts <- slots
+                              return $ slt:slts)
+                           (return [slt])
 
 doodle :: Parser.Parser DoodleExpression
 doodle = do

@@ -1,4 +1,4 @@
-module Parser (Parser, apply, sat, char, string, some, many, orelse, oneof, blank, keyword, token, text, integer, float, allof) where
+module Parser (Parser, apply, sat, char, string, some, many, orelse, oneof, blank, keyword, token, text, integer, float, allof, exactInteger) where
 
 import Control.Monad
 import Data.Char
@@ -107,6 +107,15 @@ integer =
      blank
      digits <- some (sat isDigit)
      return $ read (sign ++ digits)
+
+-- Parse exact integer (keep leading zeros)
+exactInteger :: Parser String
+exactInteger =
+    do blank
+       sign <- (string "-" >> return "-") `orelse` return ""
+       blank
+       digits <- some (sat isDigit)
+       return $ sign ++ digits
 
 -- Parse a float
 float :: Parser Float
