@@ -42,7 +42,12 @@ tst ${A:0:2} "ok"
 A=$(echo "get-doodle Cooking" | nc localhost 8000)
 tst ${A:0:2} "ok"
 # Test subscribe
-A=$(echo "subscribe studenta@$PSWD1 Cooking" | nc localhost 8000)
+A=$(echo "subscribe studenta@studentapswd Cooking" | nc localhost 8000)
 tst ${A:0:2} "ok"
 A=$(echo "subscribe studentB@$PSWD2 Cooking" | nc localhost 8000)
+tst ${A:0:2} "ok"
+# Test prefer
+A=$(echo "prefer studenta@studentapswd Cooking 2016-01-04T14:00+01:00 / 2016-01-04T16:00+0100" | nc localhost 8000)
+tst ${A:0:2} "ok"
+A=$(echo "prefer studentB@$PSWD2 Cooking 2016-01-04T13:00+01:00 / 2016-01-04T15:00+01:00" | nc localhost 8000)
 tst ${A:0:2} "ok"

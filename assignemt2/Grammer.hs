@@ -11,6 +11,8 @@ data SlotExpression = Slot {start :: T.UTCTime, end :: T.UTCTime}
 instance Show SlotExpression where
     show (Slot st en) = let format = T.formatTime T.defaultTimeLocale "%FT%R%z" in
                             format st ++ "/" ++ format en
+instance Eq SlotExpression where
+    x == y = start x == start y && end x == end y
 
 type DoodleExpression = [SlotExpression]
 
@@ -66,7 +68,7 @@ instance Show ResponseExpression where
 
 
 expression :: Parser.Parser RequestExpression
-expression = Parser.oneof [addstudent, addTeacher, subscribe, changePassword, getDoodle, setDoodle]
+expression = Parser.oneof [addstudent, addTeacher, subscribe, changePassword, getDoodle, setDoodle, prefer, examSchedule]
 
 loginexpression :: Parser.Parser LoginExpression
 loginexpression = do
@@ -86,6 +88,13 @@ parseSimpleCommand st tp = do
     Parser.keyword st
     ac <- authCommand
     return $ tp ac
+
+parseComplexCommand :: String -> Parser.Parser a -> (AuthCommand -> a -> RequestExpression) -> Parser.Parser RequestExpression
+parseComplexCommand st pr tp = do
+    Parser.keyword st
+    ac <- authCommand
+    oth <- pr
+    return $ tp ac oth
 
 addstudent :: Parser.Parser RequestExpression
 addstudent = parseSimpleCommand "add-student" AddStudent
@@ -149,8 +158,13 @@ doodle = do
     return sl
 
 setDoodle :: Parser.Parser RequestExpression
-setDoodle = do
-    Parser.keyword "set-doodle"
-    ac <- authCommand
-    d <- doodle
-    return $ SetDoodle ac d
+setDoodle = parseComplexCommand "set-doodle" doodle SetDoodle
+
+prefer :: Parser.Parser RequestExpression
+prefer = parseComplexCommand "prefer" slot Prefer
+
+examSchedule :: Parser.Parser RequestExpression
+examSchedule = do
+    Parser.keyword "exam-schedule"
+    l <- loginexpression
+    return $ ExamSchedule l

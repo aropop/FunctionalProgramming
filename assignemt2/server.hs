@@ -9,6 +9,7 @@ import           Control.Concurrent.STM
 import System.Random
 import Person
 import Doodle
+import Data.List (delete, elemIndex)
 
 main :: IO ()
 main = withSocketsDo $ do
@@ -78,8 +79,8 @@ dispatchCommand (Grammer.SetDoodle (Grammer.AuthCommand login dn) de) personList
     authenticate login TeacherRight personList $ setDoodle dn doodleList de
 dispatchCommand (Grammer.Subscribe (Grammer.AuthCommand login dn)) personList doodleList =
     authenticate login StudentRight personList $ subscribe dn doodleList
--- dispatchCommand (Grammer.Subscribe ac) personList = authenticate TeacherRight [] subscribe
--- dispatchCommand (Grammer.Prefer ac sl) personList = authenticate TeacherRight [] $ prefer sl
+dispatchCommand (Grammer.Prefer (Grammer.AuthCommand login dn) slt) personList doodleList =
+    authenticate login StudentRight personList $ prefer dn doodleList slt
 -- dispatchCommand (Grammer.ExamSchedule lg) personList = authenticate TeacherRight [] examSchedule
 
 addPerson :: String -> TVar [Person] -> PersonType -> IO Grammer.ResponseExpression
@@ -114,42 +115,67 @@ getDoodle dName doodles = do actualDoodles <- myRead doodles -- Not bad if we us
                                            (Grammer.Ok . Grammer.OkDoodle . toExpression)
                                            maybed
 
+
+withExistingDoodle :: TVar [Doodle] -> String -> (Doodle -> IO Grammer.ResponseExpression) -> IO Grammer.ResponseExpression -> IO Grammer.ResponseExpression
+withExistingDoodle doodles dName doodleExistsF exception =
+    do actualDoodles <- myRead doodles
+       maybe exception -- Uses lazy evaluation, exception will only be executed when needed
+             doodleExistsF
+             (extract (dEq dName) actualDoodles)
+
 setDoodle :: String -> TVar [Doodle] -> Grammer.DoodleExpression -> Person -> IO Grammer.ResponseExpression
 setDoodle dName doodles de p =
-    do actualDoodles <- myRead doodles
-       maybe (do _ <- readWrite doodles (\doodlesAgain -> fromExpression de dName p : doodlesAgain)
-                 return $ Grammer.Ok Grammer.OkJust)
-             (\_ -> return Grammer.IdTaken)
-             (extract (dEq dName) actualDoodles)
+    withExistingDoodle doodles
+                       dName
+                       (\_ -> return Grammer.IdTaken)
+                       (do _ <- readWrite doodles (\doodlesAgain -> fromExpression de dName p : doodlesAgain)
+                           return $ Grammer.Ok Grammer.OkJust)
 
 subscribe :: String -> TVar [Doodle] -> Person -> IO Grammer.ResponseExpression
 subscribe dName doodles p =
     do _ <- modifyDoodle dName doodles (\(Doodle slts nm pl own pr) -> Doodle slts nm (name p : pl) own pr)
        return $ Grammer.Ok Grammer.OkJust
 
--- Function to replace an element in a list
+withSubscribedUserInDoodle :: TVar [Doodle] -> String -> String -> IO Grammer.ResponseExpression -> IO Grammer.ResponseExpression -> IO Grammer.ResponseExpression
+withSubscribedUserInDoodle doodles dName pName fullfillExp exception =
+    withExistingDoodle
+        doodles
+        dName
+        (\d -> maybe exception
+                     (const fullfillExp)
+                     (extract (== pName) $ people d))
+        $ return Grammer.NoSuchId
+
 
 prefer :: String -> TVar [Doodle] -> Slot -> Person -> IO Grammer.ResponseExpression
 prefer dName doodles sl p =
-    -- TODO do checks
-    do _ <- modifyDoodle dName doodles (\(o@Doodle slts nm pl own pr) ->
-                let maybet = elemIndex sl slts
-                    pName = name p
-                    (_, newPr) = maybe pr
-                                  (\idx -> foldr (\nLst (i, build) -> if pName `elem` nLst &&
-                                                                      then if i == idx
-                                                                           then (ipp, nLst : build)
-                                                                           else (ipp, delete pName nLst : build)
-                                                                      else if i == idx
-                                                                           then (ipp, (pName : nLst) : build)
-                                                                           else (ipp, nLst : build)
-                                                                      where ipp = i + 1)
-                                                (0, [])
-                                                pr)
-                                maybet
-                in
-                   Doodle slts nm pl own newPr
-       return $ Grammer.Ok Grammer.OkJust
+    withSubscribedUserInDoodle
+        doodles
+        dName
+        (name p)
+        (do _ <- modifyDoodle
+                    dName
+                    doodles
+                    (\(Doodle slts nm pl own pr) ->
+                        let maybet = elemIndex sl slts
+                            pName = name p
+                            (_, newPr) = maybe (0, pr)
+                                               (\idx -> foldr (\nLst (i, build) ->
+                                                   let ipp = i + 1 in
+                                                       if pName `elem` nLst
+                                                       then if i == idx
+                                                            then (ipp, nLst : build)
+                                                            else (ipp, delete pName nLst : build)
+                                                       else if i == idx
+                                                            then (ipp, (pName : nLst) : build)
+                                                            else (ipp, nLst : build))
+                                                        (0, [])
+                                                        pr)
+                                               maybet
+                        in
+                           Doodle slts nm pl own newPr)
+            return $ Grammer.Ok Grammer.OkJust)
+        (return Grammer.NotSubscribed)
 
 -- Continues handling requests forever
 handleRecursive :: Socket -> TVar [Person] -> TVar [Doodle]-> IO ()
