@@ -51,3 +51,11 @@ A=$(echo "prefer studenta@studentapswd Cooking 2016-01-04T14:00+01:00 / 2016-01-
 tst ${A:0:2} "ok"
 A=$(echo "prefer studentB@$PSWD2 Cooking 2016-01-04T13:00+01:00 / 2016-01-04T15:00+01:00" | nc localhost 8000)
 tst ${A:0:2} "ok"
+# Test exam Schedule
+# Create some more data
+echo "set-doodle teacher@teacherpswd Cleaning [2016-01-05T14:00+01:00 / 2016-01-05T15:00+0100,2016-01-05T13:00+01:00 / 2016-01-05T15:00+01:00]" | nc localhost 8000
+echo "set-doodle teacher@teacherpswd Ironing [2016-01-05T14:00+01:00 / 2016-01-05T16:00+0100,2016-01-05T16:00+01:00 / 2016-01-05T17:00+01:00]" | nc localhost 8000
+echo "subscribe studentB@$PSWD2 Cleaning" | nc localhost 8000
+echo "subscribe studentB@$PSWD2 Ironing" | nc localhost 8000
+A=$(echo "exam-schedule studentB@$PSWD2" | nc localhost 8000)
+tst ${A:0:2} "ok"

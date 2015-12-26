@@ -81,7 +81,8 @@ dispatchCommand (Grammer.Subscribe (Grammer.AuthCommand login dn)) personList do
     authenticate login StudentRight personList $ subscribe dn doodleList
 dispatchCommand (Grammer.Prefer (Grammer.AuthCommand login dn) slt) personList doodleList =
     authenticate login StudentRight personList $ prefer dn doodleList slt
--- dispatchCommand (Grammer.ExamSchedule lg) personList = authenticate TeacherRight [] examSchedule
+dispatchCommand (Grammer.ExamSchedule login) personList doodleList =
+    authenticate login StudentRight personList $ examSchedule doodleList
 
 addPerson :: String -> TVar [Person] -> PersonType -> IO Grammer.ResponseExpression
 addPerson token personList tc =
@@ -177,6 +178,37 @@ prefer dName doodles sl p =
             return $ Grammer.Ok Grammer.OkJust)
         (return Grammer.NotSubscribed)
 
+
+examSchedule :: TVar [Doodle] -> Person -> IO Grammer.ResponseExpression
+examSchedule doodles (Person pName _ _) =
+    do actualDoodles <- myRead doodles
+       let relevantDoodles = filter (\d -> pName `elem` people d) actualDoodles
+           getSlot d = snd $ foldr (\nl (i, p) -> if pName `elem` nl -- Checks prevent name being in 2 prefered slots
+                                                  then (i+1, [slots d !! i])
+                                                  else (i+1, p))
+                                   (0, [])
+                                   $ preferences d
+            -- Slots here are represented in tuples (doodleName, slotTime)
+           (filledInSlots, notFilledInDoodles) =
+               foldr (\d (sls, ds) -> let sl = getSlot d
+                                      in if null sl
+                                         then (sls, d:ds)
+                                         else ((dname d, head sl):sls, ds))
+                     ([], [])
+                     relevantDoodles
+            -- Slots where the user did not prefer in the exam
+           availableSlots = map (\d-> map (\s -> (dname d, s)) $ slots d) notFilledInDoodles
+           -- Create all possible permutations and filter out the ones that are not possible
+           possible sl = foldr (\el b -> not (sOverlap (snd sl) (snd el)) && b) True
+           possibleList slts = foldr (\el b -> b && possible el (delete el slts)) True slts
+           permutations = foldr (\cl tl -> [y:x | x <- tl, y <- cl]) [filledInSlots] availableSlots
+           possiblePermutations = filter possibleList permutations
+       if null possiblePermutations
+          then return Grammer.NoPossibleSchedule
+          else do let exams = map (uncurry Grammer.Exam) $ head possiblePermutations -- take first possible
+                  return $ Grammer.Ok $ Grammer.OkSchedule $ Grammer.Schedule exams
+
+
 -- Continues handling requests forever
 handleRecursive :: Socket -> TVar [Person] -> TVar [Doodle]-> IO ()
 handleRecursive sock pl dl = do
@@ -187,14 +219,15 @@ handleRecursive sock pl dl = do
 
 handleCommand :: Handle -> TVar [Person] -> TVar [Doodle] -> IO ()
 handleCommand handle personList doodleList = do
-    print "Handling new command:"
+    putStrLn "Handling new command:"
     message <- hGetContents handle
-    print $ "Contents -> " ++ message
+    putStrLn $ "Contents -> " ++ message
     let parsed =  Parser.apply Grammer.expression message
     -- If nothing is parsed, we return couldnotparse response
     response <- if null parsed
                    then return Grammer.CouldNotParse
                    else dispatchCommand ((fst.head) parsed) personList doodleList
-    print $ "Response:" ++ show response
+    putStrLn $ "Response:" ++ show response
+    putStrLn ""
     hPrint handle response
     hClose handle

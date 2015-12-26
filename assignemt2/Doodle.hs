@@ -27,3 +27,10 @@ addSlot sl (Doodle sls dn pls own prefs) = Doodle (sl:sls) dn pls own $ [] : pre
 
 dEq :: String -> Doodle -> Bool
 dEq s d = s == dname d
+
+sOverlap :: Slot -> Slot -> Bool
+sOverlap s1 s2 = (st1 <= st2) && (en1 > st2) || (st1 < en2) && (en1 >= en2)
+                 where st1 = Grammer.start s1
+                       st2 = Grammer.start s2
+                       en1 = Grammer.end s1
+                       en2 = Grammer.end s2
