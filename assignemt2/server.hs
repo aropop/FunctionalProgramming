@@ -11,17 +11,20 @@ import Person
 import Doodle
 import Data.List (delete, elemIndex)
 
+-- Main function
 main :: IO ()
 main = withSocketsDo $ do
-    personList <- atomically $ newTVar [Person "admin" "1234" Admin]
+    -- Create TVars
+    personList <- atomically $ newTVar [Person "admin" "1234" Admin] -- automatically add admin
     doodleList <- atomically $ newTVar []
-    sock <- listenOn $ PortNumber 8000
+    sock <- listenOn $ PortNumber 8000 -- Start server on port 8000
     putStrLn "Server started on 8000"
-    handleRecursive sock personList doodleList
+    handleRecursive sock personList doodleList -- Start loop
 
+-- Different rights
 data Right = AdminRight | TeacherRight | StudentRight | PersonRight deriving (Show, Enum, Eq)
 
--- TODO verber
+-- Returns a person if that person has the right and its username and password are correct
 compr :: Right -> String -> String -> Person -> Maybe Person -> Maybe Person
 compr _ _ _ _ (Just p) = Just p
 compr AdminRight givenU givenP person@(Person u p Admin) Nothing = if u == givenU && p == givenP then Just person else Nothing
@@ -43,29 +46,40 @@ comprr f a Nothing = if f a then Just a else Nothing
 extract :: (a -> Bool) -> [a] -> Maybe a
 extract f = foldr (comprr f) Nothing
 
+-- Authenticates a person, takes a function that returns the response and feeds
+-- it the person if that person is authenticated, otherwise returns wrong login
+-- error response
 authenticate :: Grammer.LoginExpression -> Right -> TVar [Person] -> (Person -> IO Grammer.ResponseExpression) -> IO Grammer.ResponseExpression
 authenticate (Grammer.Login u p) r ps f =
     do persons <- atomically(readTVar ps)
        let maybep = foldr (compr r u p) Nothing persons
        maybe (return Grammer.WrongLogin) f maybep
 
+-- Executes a function that modifies a tvar
 readWrite:: TVar [a] -> ([a] -> [a]) -> IO (TVar [a])
 readWrite tvar f = atomically(do l <- readTVar tvar
                                  writeTVar tvar $ f l
                                  return tvar)
 
+-- Reads a Tvar
 myRead :: TVar [a] -> IO [a]
 myRead tvar = atomically (readTVar tvar)
 
+-- Modifies a single element in a Tvar list
 modify :: (a -> Bool) -> TVar [a] -> (a -> a) -> IO (TVar [a])
 modify identifyF tvar f = readWrite tvar $ foldr (\el build -> if identifyF el then f el : build else el : build) []
 
+-- Modify a single person
 modifyPerson :: String -> TVar [Person] -> (Person -> Person) -> IO (TVar [Person])
 modifyPerson identify = modify (\(Person n _ _) -> n == identify)
 
+-- Modify a single doodle
 modifyDoodle :: String -> TVar [Doodle] -> (Doodle -> Doodle) -> IO (TVar [Doodle])
 modifyDoodle identify = modify (\(Doodle _ n _ _ _) -> n == identify)
 
+-- Dispatch over all commands, authenticate them and curry the handling function
+-- for a specific command. Each handling function has to take the auth person
+-- as last parameter
 dispatchCommand :: Grammer.RequestExpression -> TVar [Person] -> TVar [Doodle] -> IO Grammer.ResponseExpression
 dispatchCommand (Grammer.AddTeacher (Grammer.AuthCommand login command)) personList _ =
     authenticate login AdminRight personList $ addTeacher command personList
@@ -84,27 +98,33 @@ dispatchCommand (Grammer.Prefer (Grammer.AuthCommand login dn) slt) personList d
 dispatchCommand (Grammer.ExamSchedule login) personList doodleList =
     authenticate login StudentRight personList $ examSchedule doodleList
 
+
+-- Handle add person, abstract function, takes a person type to create the right
+-- kind of user
 addPerson :: String -> TVar [Person] -> PersonType -> IO Grammer.ResponseExpression
 addPerson token personList tc =
     do gen <- newStdGen
        let pass = take 4 $ randomRs ('a','z') gen
        let pnElem s = foldr (\x -> (||) (s == name x)) False
-       persons <- myRead personList
+       persons <- myRead personList -- Read to know if the person already exist
        if pnElem token persons then
            return Grammer.IdTaken
        else
            do _ <- readWrite personList (\ps -> Person token pass tc : ps) -- Prevent race condition
               return $ Grammer.Ok $ Grammer.OkToken pass
 
-
+-- Handle add teacher
 addTeacher :: String -> TVar [Person] -> Person -> IO Grammer.ResponseExpression
 addTeacher token personList _ = addPerson token personList Teacher
 
+-- Handle add student
 addStudent :: String -> TVar [Person] -> Person -> IO Grammer.ResponseExpression
 addStudent token personList _ = addPerson token personList Student
 
+-- Handle change password
 changePassword :: String -> TVar [Person] -> Person -> IO Grammer.ResponseExpression
 changePassword token personList person =
+    -- Modify a single person
     do _ <- modifyPerson (name person) personList (\(Person nm _ tc) -> Person nm token tc)
        return $ Grammer.Ok Grammer.OkJust
 
@@ -116,7 +136,8 @@ getDoodle dName doodles = do actualDoodles <- myRead doodles -- Not bad if we us
                                            (Grammer.Ok . Grammer.OkDoodle . toExpression)
                                            maybed
 
-
+-- Abstract function that feeds a doodle into a function if the doodle exists,
+-- and returns an exception if it does not
 withExistingDoodle :: TVar [Doodle] -> String -> (Doodle -> IO Grammer.ResponseExpression) -> IO Grammer.ResponseExpression -> IO Grammer.ResponseExpression
 withExistingDoodle doodles dName doodleExistsF exception =
     do actualDoodles <- myRead doodles
@@ -124,19 +145,24 @@ withExistingDoodle doodles dName doodleExistsF exception =
              doodleExistsF
              (extract (dEq dName) actualDoodles)
 
+-- Handle set doodle
 setDoodle :: String -> TVar [Doodle] -> Grammer.DoodleExpression -> Person -> IO Grammer.ResponseExpression
 setDoodle dName doodles de p =
     withExistingDoodle doodles
                        dName
                        (\_ -> return Grammer.IdTaken)
+                       -- Following do will be lazely evaluated
                        (do _ <- readWrite doodles (\doodlesAgain -> fromExpression de dName p : doodlesAgain)
                            return $ Grammer.Ok Grammer.OkJust)
 
+-- Handle subscribe
 subscribe :: String -> TVar [Doodle] -> Person -> IO Grammer.ResponseExpression
 subscribe dName doodles p =
     do _ <- modifyDoodle dName doodles (\(Doodle slts nm pl own pr) -> Doodle slts nm (name p : pl) own pr)
        return $ Grammer.Ok Grammer.OkJust
 
+-- Abstract function that returns a fullfilled expression if user in doodle
+-- and returns an exception expression if he's not in doodle
 withSubscribedUserInDoodle :: TVar [Doodle] -> String -> String -> IO Grammer.ResponseExpression -> IO Grammer.ResponseExpression -> IO Grammer.ResponseExpression
 withSubscribedUserInDoodle doodles dName pName fullfillExp exception =
     withExistingDoodle
@@ -147,22 +173,24 @@ withSubscribedUserInDoodle doodles dName pName fullfillExp exception =
                      (extract (== pName) $ people d))
         $ return Grammer.NoSuchId
 
-
+-- Handle prefer
 prefer :: String -> TVar [Doodle] -> Slot -> Person -> IO Grammer.ResponseExpression
 prefer dName doodles sl p =
-    withSubscribedUserInDoodle
+    withSubscribedUserInDoodle -- User should be subscribed
         doodles
         dName
         (name p)
-        (do _ <- modifyDoodle
+        (do _ <- modifyDoodle -- Modify a single doodle
                     dName
                     doodles
-                    (\(Doodle slts nm pl own pr) ->
+                    (\(Doodle slts nm pl own pr) -> -- Add the preference
                         let maybet = elemIndex sl slts
                             pName = name p
                             (_, newPr) = maybe (0, pr)
                                                (\idx -> foldr (\nLst (i, build) ->
                                                    let ipp = i + 1 in
+                                                       -- Check if user not already in list
+                                                       -- If so replace his preference
                                                        if pName `elem` nLst
                                                        then if i == idx
                                                             then (ipp, nLst : build)
@@ -174,11 +202,11 @@ prefer dName doodles sl p =
                                                         pr)
                                                maybet
                         in
-                           Doodle slts nm pl own newPr)
-            return $ Grammer.Ok Grammer.OkJust)
+                           Doodle slts nm pl own newPr) -- return new doodle
+            return $ Grammer.Ok Grammer.OkJust) -- Return ok to client
         (return Grammer.NotSubscribed)
 
-
+-- Handle exam schedule
 examSchedule :: TVar [Doodle] -> Person -> IO Grammer.ResponseExpression
 examSchedule doodles (Person pName _ _) =
     do actualDoodles <- myRead doodles
@@ -217,6 +245,7 @@ handleRecursive sock pl dl = do
     _ <- ($) forkIO $ handleCommand handle pl dl
     handleRecursive sock pl dl
 
+-- Handle a single command
 handleCommand :: Handle -> TVar [Person] -> TVar [Doodle] -> IO ()
 handleCommand handle personList doodleList = do
     putStrLn "Handling new command:"

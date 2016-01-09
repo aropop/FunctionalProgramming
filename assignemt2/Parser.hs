@@ -3,6 +3,8 @@ module Parser (Parser, apply, sat, char, string, some, many, orelse, oneof, blan
 import Control.Monad
 import Data.Char
 
+-- Based on the solutions of wpo 10
+
 newtype Parser a = P (String -> [(a,String)])
 
 apply :: Parser a -> String -> [(a,String)]
